@@ -1,0 +1,306 @@
+Parameters:
+  CodePipelineName:
+    Description: CodePipeline name
+    Type: String
+    Default: uredu-academy-final-codepipeline
+  BranchName:
+    Description: CodeCommit branch name
+    Type: String
+    Default: main
+  RepositoryName:
+    Description: CodeComit repository name
+    Type: String
+    Default: uredu-academy-final
+  ProjectName:
+    Description: CodeBuild project name
+    Type: String
+    Default: uredu-academy-final-codebuild
+  CodePipelineServiceRoleName:
+    Description: CodePipeline Service role name
+    Type: String
+    Default: uredu-academy-final-pipeline-role
+  CodeCommitEventRoleName:
+    Description: Role name for events on CodeCommit
+    Type: String
+    Default: uredu-academy-commit-event-role
+  CodeBuildServiceRoleName:
+    Description: Role name for CodeBuild
+    Type: String
+    Default: uredu-academy-final-codebuild-role
+
+Resources:
+  UreduCodePipelineArtifactStoreBucket:
+    Type: 'AWS::S3::Bucket'
+
+  UreduCodePipelineArtifactStoreBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref UreduCodePipelineArtifactStoreBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:PutObject'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - UreduCodePipelineArtifactStoreBucket
+                  - Arn
+                - /*
+            Condition:
+              StringNotEquals:
+                's3:x-amz-server-side-encryption': 'aws:kms'
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - UreduCodePipelineArtifactStoreBucket
+                  - Arn
+                - /*
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
+  UreduCloudWatchEventRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Ref CodeCommitEventRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: cwe-pipeline-execution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'codepipeline:StartPipelineExecution'
+                Resource: !Join 
+                  - ''
+                  - - 'arn:aws:codepipeline:'
+                    - !Ref 'AWS::Region'
+                    - ':'
+                    - !Ref 'AWS::AccountId'
+                    - ':'
+                    - !Ref UreduPipeline
+
+  UreduCloudWatchEventRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - !Join 
+            - ''
+            - - 'arn:aws:codecommit:'
+              - !Ref 'AWS::Region'
+              - ':'
+              - !Ref 'AWS::AccountId'
+              - ':'
+              - !Ref RepositoryName
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - main
+      Targets:
+        - Arn: !Join 
+            - ''
+            - - 'arn:aws:codepipeline:'
+              - !Ref 'AWS::Region'
+              - ':'
+              - !Ref 'AWS::AccountId'
+              - ':'
+              - !Ref UreduPipeline
+          RoleArn: !GetAtt 
+            - UreduCloudWatchEventRole
+            - Arn
+          Id: codepipeline-UreduPipeline
+
+  UreduCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref ProjectName
+      Description: Code build project for final assignment, Academy 2023
+      ServiceRole: !GetAtt UreduCodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+      Source:
+        BuildSpec: buildspec.yml
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+    
+  UreduCodeBuildServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Ref CodeBuildServiceRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        ['arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole']
+      Policies:
+        - PolicyName: AWS-CodeBuild-Service-3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StartBuild'
+                  - 'codebuild:CreateReportGroup'
+                  - 'codebuild:CreateReport'
+                  - 'codebuild:UpdateReport'
+                  - 'codebuild:BatchPutTestCases'
+                  - 'codebuild:BatchPutCodeCoverages'                
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'iam:PassRole'
+                  - 'iam:CreateRole'
+                  - 'iam:UpdateRole'
+                  - 'iam:DeleteRole'
+                  - 'iam:PutRolePolicy'
+                  - 'iam:DetachRolePolicy'
+                  - 'iam:AttachRolePolicy'
+                  - 'iam:DeleteRolePolicy'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'cloudwatch:*'
+                  - 's3:*'
+                  - 'sns:*'
+                  - 'cloudformation:*'
+                  - 'sqs:*'
+                  - 'dynamodb:*'
+                  - 'lambda:*'
+                  - 'secretsmanager:*'
+                Resource: '*'
+
+  UreduPipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: !Ref CodePipelineName
+      RoleArn: !GetAtt 
+        - UreduCodePipelineServiceRole
+        - Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceAction
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                BranchName: !Ref BranchName
+                RepositoryName: !Ref RepositoryName
+                PollForSourceChanges: false
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              InputArtifacts:
+                - Name: SourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref ProjectName
+              RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Ref UreduCodePipelineArtifactStoreBucket
+
+  UreduCodePipelineServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Ref CodePipelineServiceRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        ['arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole']
+      Policies:
+        - PolicyName: AWS-CodePipeline-Service-3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'codecommit:CancelUploadArchive'
+                  - 'codecommit:GetBranch'
+                  - 'codecommit:GetCommit'
+                  - 'codecommit:GetUploadArchiveStatus'
+                  - 'codecommit:UploadArchive'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StartBuild'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                  - 'lambda:ListFunctions'
+                  - 'lambda:GetFunction'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'iam:PassRole'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'cloudwatch:*'
+                  - 's3:*'
+                  - 'sns:*'
+                  - 'cloudformation:*'
+                  - 'sqs:*'
+                  - 'dynamodb:*'
+                  - 'lambda:*'
+                  - 'secretsmanager:*'
+                Resource: '*'

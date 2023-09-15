@@ -1,0 +1,128 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo Entered the install phase...
+
+      - echo "=============== Pipeline install Begin ================"
+      - echo $(date)
+      - echo "current directory $(pwd)"
+      - ls -al
+      - echo "================ Piepline install End ================="
+
+  pre_build:
+    commands:
+      - echo Entered the pre_build phase...
+
+      - echo "=============== S3 export variables Begin ================"
+      - export S3_ADMIN_DATA="admin-academy-data"
+      - export S3_STACK_NAME="uredu-academy-final-s3"
+      - export S3_BUCKET_SCRIPTS="uredu-academy-final-scripts"
+      - export S3_BUCKET_DATA="uredu-academy-final-data"
+      - echo "================ S3 export variables End ================="
+
+      - echo "=============== Glue export variables Begin ================"
+      - export GLUE_ADMIN_DATABASE_NAME="admin-academy-twitter"
+      - export GLUE_STACK_NAME="uredu-academy-final-glue"
+      - export GLUE_ROLE_NAME="uredu-academy-final-glue-role"
+      - export GLUE_DATABASE_LANDING="uredu-academy-final-landing"
+      - export GLUE_DATABASE_DATALAKE="uredu-academy-final-datalake"
+      - echo "================ Glue export variables End ================="
+
+      - echo "=============== DynamoDB export variables Begin ================"
+      - export DYNAMODB_STACK_NAME="uredu-academy-final-dynamodb"
+      - export DYNAMODB_TABLE_NAME="uredu-academy-final-table"
+      - echo "================ DynamoDB export variables End ================="
+
+      - echo "=============== Lambda export variables Begin ================"
+      - export LAMBDA_NAME="uredu-academy-final-lambda"
+      - export LAMBDA_ROLE_NAME="uredu-academy-final-lambda-role"
+      - export LAMBDA_UPLOAD_UNIXT=$(date +%s)
+      - echo "================ Lambda export variables End ================="
+
+      - echo "=============== SecretsManager export variables Begin ================"
+      - export SECRETS_MANAGER_STACK_NAME="uredu-academy-final-secretsmanager"
+      - export SECRETS_MANAGER_NAME="uredu-academy-final-key"
+      - echo "================ SecretsManager export variables End ================="
+
+
+  
+  build:
+    commands:
+      - echo Entered the build phase...
+
+      - echo "=============== S3 stack Deployment ================"
+      - >
+        aws cloudformation deploy \
+          --template-file "cicd/s3.yml" \
+          --stack-name $S3_STACK_NAME \
+          --parameter-overrides \
+            S3BucketData=$S3_BUCKET_DATA \
+            S3BucketScripts=$S3_BUCKET_SCRIPTS
+      - echo "================ S3 stack Complete ================="
+
+      - echo "=============== S3 sync Begin ================"
+      - aws s3 sync resources/glue/ s3://${S3_BUCKET_SCRIPTS}/glue/
+      - > 
+        zip -r9j \
+          resources/lambda/${LAMBDA_NAME}.zip \
+          resources/lambda/${LAMBDA_NAME}.py
+
+      - aws s3 sync resources/lambda/ s3://${S3_BUCKET_SCRIPTS}/lambda/${LAMBDA_UPLOAD_UNIXT}/
+
+      - echo "================ S3 sync End ================="
+
+      - echo "=============== Glue stack Deployment ================"
+      - >
+        aws cloudformation deploy \
+          --template-file "cicd/glue.yml" \
+          --stack-name $GLUE_STACK_NAME \
+          --parameter-overrides \
+            S3AdminData=$S3_ADMIN_DATA \
+            S3BucketData=$S3_BUCKET_DATA \
+            S3BucketScripts=$S3_BUCKET_SCRIPTS \
+            DynamoDBTable=$DYNAMODB_TABLE_NAME \
+            GlueAdminDatabaseName=$GLUE_ADMIN_DATABASE_NAME \
+            GlueJobName=$GLUE_STACK_NAME \
+            GlueJobRoleName=$GLUE_ROLE_NAME \
+            GlueDatabaseDatalakeName=$GLUE_DATABASE_DATALAKE \
+            GlueDatabaseLandingName=$GLUE_DATABASE_LANDING \
+          --capabilities CAPABILITY_NAMED_IAM
+      - echo "================ Glue stack Complete ================="
+      
+      - echo "============= DynamoDB stack Deployment =============="
+      - >
+        aws cloudformation deploy \
+          --template-file "cicd/dynamodb.yml" \
+          --stack-name $DYNAMODB_STACK_NAME \
+          --parameter-overrides \
+            DynamoDBTable=$DYNAMODB_TABLE_NAME
+      - echo "============== DynamoDB stack Complete ==============="
+
+      - echo "=============== SecretsManager stack Deployment ================"
+      - >
+        aws cloudformation deploy \
+          --template-file "cicd/secretsmanager.yml" \
+          --stack-name $SECRETS_MANAGER_STACK_NAME \
+          --parameter-overrides \
+            SecretsManagerName=$SECRETS_MANAGER_NAME \
+          --capabilities CAPABILITY_NAMED_IAM
+      - echo "================ SecretsManager stack Complete ================="
+      
+      - echo "=============== Lambda stack Deployment ================"
+      - >
+        aws cloudformation deploy \
+          --template-file "cicd/lambda.yml" \
+          --stack-name $LAMBDA_NAME \
+          --parameter-overrides \
+            S3BucketScriptsName=$S3_BUCKET_SCRIPTS \
+            LambdaName=$LAMBDA_NAME \
+            LambdaRoleName=$LAMBDA_ROLE_NAME \
+            LambdaUploadUNIXT=$LAMBDA_UPLOAD_UNIXT \
+          --capabilities CAPABILITY_NAMED_IAM
+      - echo "================ Lambda stack Complete ================="
+  post_build:
+    commands:
+      - echo Entered the post_build phase...
+      - echo Build completed on $(date)

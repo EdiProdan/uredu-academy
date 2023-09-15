@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  S3AdminData:
+    Description: s3 bucket for admin twitter data
+    Type: String
+    Default: admin-academy-data
+  S3BucketData:
+    Description: s3 bucket for datalake
+    Type: String
+    Default: uredu-academy-final-data
+  S3BucketScripts:
+    Description: s3 bucket for scripts
+    Type: String
+    Default: uredu-academy-final-scripts
+  DynamoDBTable:
+    Description: DynamoDB table with min_ingestion_dttm
+    Type: String
+    Default: uredu-academy-final-table
+  GlueAdminDatabaseName:
+    Description: Glue admin databse with twitter data
+    Type: String
+    Default: admin-academy-twitter
+  GlueJobName:
+    Description: Name for glue job
+    Type: String
+    Default: uredu-academy-final-glue
+  GlueJobRoleName:
+    Description: Name for glue role
+    Type: String
+    Default: uredu-academy-final-glue-role
+  GlueDatabaseDatalakeName:
+    Description: Name of glue datalake database
+    Type: String
+    Default: uredu-academy-final-datalake
+  GlueDatabaseLandingName:
+    Description: Name of glue landing database
+    Type: String
+    Default: uredu-academy-final-landing
+ 
+Resources:
+  UreduAcademyGlueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref GlueJobRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "glue.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        ['arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole']
+      Policies:
+        - PolicyName: "S3BucketAccessPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: 
+                  - "s3:GetObject"
+                  - "s3:PutObject"
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3AdminData}/*"
+                  - !Sub "arn:aws:s3:::${S3BucketData}/*"
+                  - !Sub "arn:aws:s3:::${S3BucketScripts}/*"
+        - PolicyName: "IAMPassPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'iam:PassRole'
+                Resource: '*'
+        - PolicyName: "AccessDynamoDBTables"
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:UpdateItem"
+                  - "dynamodb:Query"
+                  - "dynamodb:Scan"
+                  - "dynamodb:DeleteItem"
+                Resource: !Sub "arn:aws:dynamodb:eu-central-1:456582705970:table/${DynamoDBTable}"
+
+  UreduDatalakeDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GlueDatabaseDatalakeName
+        Description: "Cloud Formation datalake database"
+        LocationUri: !Sub "s3://${S3BucketData}/twitter/datalake"
+
+  UreduLandingDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GlueDatabaseLandingName
+        Description: "Cloud Formation landing database"
+        LocationUri: !Sub "s3://${S3BucketData}/twitter/landing"
+
+  UreduGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Command:
+        Name: 'glueetl'
+        ScriptLocation: !Sub "s3://${S3BucketScripts}/glue/${GlueJobName}.py"
+        PythonVersion: '3'
+      DefaultArguments:
+        "--JOB_NAME": !Ref GlueJobName
+        "--DATABASE_LANDING": !Ref GlueAdminDatabaseName
+        "--S3_BUCKET_DATA": !Ref S3BucketData
+        "--S3_BUCKET_ADMIN": !Ref S3AdminData
+        "--DYNAMODB_TABLE": !Ref DynamoDBTable
+      Name: !Ref GlueJobName
+      Description: "Read landing data catalog and save to s3 datalake .parquet"
+      Role: !GetAtt UreduAcademyGlueRole.Arn
+      Timeout: 480
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      GlueVersion: '4.0'

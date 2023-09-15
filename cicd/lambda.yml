@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09" 
+
+Parameters:
+  S3BucketScriptsName:
+    Type: String
+  LambdaName:
+    Type: String
+  LambdaRoleName:
+    Type: String
+  LambdaUploadUNIXT:
+    Type: String
+
+Resources:
+  LambdaRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Ref LambdaRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "events:*"
+                  - "redshift:*"
+                  - "lambda:*"
+                  - "secretsmanager:*"
+                Resource: "*"
+  
+  LambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: !Ref LambdaName
+      Description: Fill uredu-academy-final-schema in Redshift with uredu-academy-final-lambda data
+      Runtime: python3.8
+      Layers:
+        - arn:aws:lambda:eu-central-1:898466741470:layer:psycopg2-py38:1
+      Role: !GetAtt LambdaRole.Arn
+      Handler: uredu-academy-final-lambda.lambda_handler
+      Code:
+        S3Bucket: !Ref S3BucketScriptsName
+        S3Key: !Sub "lambda/${LambdaUploadUNIXT}/${LambdaName}.zip"
+      PackageType: Zip
+      MemorySize: 1024
+      Timeout: 900
+      Environment:
+        Variables:
+          secretName: "uredu-academy-final-key"
+
+
+  

@@ -1,0 +1,22 @@
+Parameters:
+  S3BucketData:
+    Description: s3 bucket for datalake
+    Type: String
+    Default: uredu-academy-final-data
+  S3BucketScripts:
+    Description: s3 bucket for scripts
+    Type: String
+    Default: uredu-academy-final-scripts
+
+Resources:
+  UreduAcademyDataS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref S3BucketData
+  
+  UreduAcademyScriptsS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref S3BucketScripts
